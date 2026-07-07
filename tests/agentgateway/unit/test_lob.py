@@ -624,7 +624,7 @@ class TestCallMcpToolLob:
         with (
             patch("sap_cloud_sdk.agentgateway._lob.httpx.AsyncClient") as mock_http,
             patch(
-                "sap_cloud_sdk.agentgateway._lob.streamablehttp_client"
+                "sap_cloud_sdk.agentgateway._lob.streamable_http_client"
             ) as mock_stream,
             patch("sap_cloud_sdk.agentgateway._lob.ClientSession") as mock_session,
         ):
@@ -675,7 +675,7 @@ class TestCallMcpToolLob:
         with (
             patch("sap_cloud_sdk.agentgateway._lob.httpx.AsyncClient") as mock_http,
             patch(
-                "sap_cloud_sdk.agentgateway._lob.streamablehttp_client"
+                "sap_cloud_sdk.agentgateway._lob.streamable_http_client"
             ) as mock_stream,
             patch("sap_cloud_sdk.agentgateway._lob.ClientSession") as mock_session,
         ):

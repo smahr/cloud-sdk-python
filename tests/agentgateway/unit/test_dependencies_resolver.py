@@ -23,11 +23,11 @@ class TestEnvironmentDependenciesResolver:
             [
                 {
                     "ordId": "sap.example:apiResource:demo:v1",
-                    "data": {"globalTenantId": "123456"},
+                    "globalTenantId": "123456",
                 },
                 {
                     "ordId": "sap.flights:mcpServer:v1",
-                    "data": {"globalTenantId": "789012"},
+                    "globalTenantId": "789012",
                 },
             ]
         )
@@ -78,7 +78,7 @@ class TestEnvironmentDependenciesResolver:
         deps_json = json.dumps(
             [
                 {
-                    "data": {"globalTenantId": "123456"},
+                    "globalTenantId": "123456",
                     # Missing ordId
                 },
             ]
@@ -90,12 +90,12 @@ class TestEnvironmentDependenciesResolver:
                 resolver.resolve()
 
     def test_raises_on_missing_global_tenant_id(self):
-        """Raise error when dependency is missing globalTenantId in data."""
+        """Raise error when dependency is missing globalTenantId."""
         deps_json = json.dumps(
             [
                 {
                     "ordId": "sap.example:apiResource:demo:v1",
-                    "data": {},  # Missing globalTenantId
+                    # Missing globalTenantId
                 },
             ]
         )

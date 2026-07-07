@@ -5,7 +5,7 @@ import uuid
 
 import httpx
 from mcp import ClientSession, McpError
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
 
 from sap_cloud_sdk.agentgateway._models import MCPTool
 from sap_cloud_sdk.agentgateway.exceptions import AgentGatewayServerError
@@ -41,7 +41,7 @@ async def invoke_mcp_tool(
         timeout=timeout,
     ) as http_client:
         try:
-            async with streamablehttp_client(tool.url, http_client=http_client) as (
+            async with streamable_http_client(tool.url, http_client=http_client) as (
                 read,
                 write,
                 _,

@@ -664,7 +664,7 @@ class TestCallMcpToolCustomer:
                 "httpx.AsyncClient",
             ) as mock_client_class,
             patch(
-                "sap_cloud_sdk.agentgateway._customer.streamablehttp_client",
+                "sap_cloud_sdk.agentgateway._customer.streamable_http_client",
             ) as mock_stream,
             patch(
                 "sap_cloud_sdk.agentgateway._customer.ClientSession",
@@ -713,7 +713,7 @@ class TestCallMcpToolCustomer:
                 "httpx.AsyncClient",
             ) as mock_client_class,
             patch(
-                "sap_cloud_sdk.agentgateway._customer.streamablehttp_client",
+                "sap_cloud_sdk.agentgateway._customer.streamable_http_client",
             ) as mock_stream,
             patch(
                 "sap_cloud_sdk.agentgateway._customer.ClientSession",
@@ -835,7 +835,7 @@ class TestLoadCustomerCredentialsFromEnv:
             [
                 {
                     "ordId": "sap.example:apiResource:demo:v1",
-                    "data": {"globalTenantId": "123456"},
+                    "globalTenantId": "123456",
                 }
             ]
         )

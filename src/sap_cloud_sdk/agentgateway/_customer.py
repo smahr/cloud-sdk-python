@@ -22,7 +22,7 @@ import uuid
 
 import httpx
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
 
 from sap_cloud_sdk.agentgateway._dependencies_resolver import (
     EnvironmentDependenciesResolver,
@@ -713,18 +713,18 @@ async def _list_server_tools(
     Raises:
         AgentGatewaySDKError: If server does not provide serverInfo.name.
     """
-    async with streamablehttp_client(
-        url,
+    async with httpx.AsyncClient(
         headers={
             "Authorization": f"Bearer {auth_token}",
             "x-correlation-id": str(uuid.uuid4()),
         },
         timeout=timeout,
-    ) as (
-        read,
-        write,
-        _,
-    ):
+    ) as http_client:
+        async with streamable_http_client(url, http_client=http_client) as (
+            read,
+            write,
+            _,
+        ):
             async with ClientSession(read, write) as session:
                 init_result = await session.initialize()
 
@@ -870,25 +870,25 @@ async def call_mcp_tool_customer(
     """
     logger.info("Calling tool '%s' on server '%s'", tool.name, tool.server_name)
 
-    async with streamablehttp_client(
-        tool.url,
+    async with httpx.AsyncClient(
         headers={
             "Authorization": f"Bearer {auth_token}",
             "x-correlation-id": str(uuid.uuid4()),
         },
         timeout=timeout,
-    ) as (
-        read,
-        write,
-        _,
-    ):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            result = await session.call_tool(tool.name, kwargs)
+    ) as http_client:
+        async with streamable_http_client(tool.url, http_client=http_client) as (
+            read,
+            write,
+            _,
+        ):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                result = await session.call_tool(tool.name, kwargs)
 
-            if not result.content:
-                logger.warning("Tool '%s' returned empty content", tool.name)
-                return ""
+                if not result.content:
+                    logger.warning("Tool '%s' returned empty content", tool.name)
+                    return ""
 
-            first = result.content[0]
-            return str(getattr(first, "text", ""))
+                first = result.content[0]
+                return str(getattr(first, "text", ""))
