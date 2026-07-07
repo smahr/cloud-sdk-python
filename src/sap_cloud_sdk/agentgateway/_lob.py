@@ -12,7 +12,7 @@ import uuid
 
 import httpx
 from mcp import ClientSession
-from mcp.client.streamable_http import streamable_http_client
+from mcp.client.streamable_http import streamablehttp_client
 from sap_cloud_sdk.destination import (
     create_client as create_destination_client,
     ConsumptionLevel,
@@ -296,38 +296,38 @@ async def list_server_tools(
     Returns:
         List of MCPTool objects from this server.
     """
-    async with httpx.AsyncClient(
+    async with streamablehttp_client(
+        dest_url,
         headers={
             "Authorization": f"Bearer {auth_token}",
             "x-correlation-id": str(uuid.uuid4()),
         },
         timeout=timeout,
-    ) as http_client:
-        async with streamable_http_client(dest_url, http_client=http_client) as (
-            read,
-            write,
-            _,
-        ):
-            async with ClientSession(read, write) as session:
-                init_result = await session.initialize()
-                server_name = (
-                    init_result.serverInfo.name
-                    if init_result
-                    and init_result.serverInfo
-                    and init_result.serverInfo.name
-                    else fragment_name
+    ) as (
+        read,
+        write,
+        _,
+    ):
+        async with ClientSession(read, write) as session:
+            init_result = await session.initialize()
+            server_name = (
+                init_result.serverInfo.name
+                if init_result
+                and init_result.serverInfo
+                and init_result.serverInfo.name
+                else fragment_name
+            )
+            result = await session.list_tools()
+            return [
+                MCPTool(
+                    name=t.name,
+                    server_name=server_name,
+                    description=t.description or "",
+                    input_schema=t.inputSchema or {},
+                    url=dest_url,
+                    fragment_name=fragment_name,
                 )
-                result = await session.list_tools()
-                return [
-                    MCPTool(
-                        name=t.name,
-                        server_name=server_name,
-                        description=t.description or "",
-                        input_schema=t.inputSchema or {},
-                        url=dest_url,
-                        fragment_name=fragment_name,
-                    )
-                    for t in result.tools
+                for t in result.tools
                 ]
 
 
@@ -410,26 +410,26 @@ async def call_mcp_tool_lob(
     Returns:
         Tool execution result as string.
     """
-    async with httpx.AsyncClient(
+    async with streamablehttp_client(
+        tool.url,
         headers={
             "Authorization": f"Bearer {user_auth_token}",
             "x-correlation-id": str(uuid.uuid4()),
         },
         timeout=timeout,
-    ) as http_client:
-        async with streamable_http_client(tool.url, http_client=http_client) as (
-            read,
-            write,
-            _,
-        ):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                result = await session.call_tool(tool.name, kwargs)
-                if not result.content:
-                    logger.warning("Tool '%s' returned empty content", tool.name)
-                    return ""
-                first = result.content[0]
-                return str(getattr(first, "text", ""))
+    ) as (
+        read,
+        write,
+        _,
+    ):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            result = await session.call_tool(tool.name, kwargs)
+            if not result.content:
+                logger.warning("Tool '%s' returned empty content", tool.name)
+                return ""
+            first = result.content[0]
+            return str(getattr(first, "text", ""))
 
 
 async def _fetch_agent_card(
