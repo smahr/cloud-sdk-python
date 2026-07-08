@@ -682,7 +682,7 @@ async def _list_server_tools(
             write,
             _,
         ):
-        async with ClientSession(read, write) as session:
+            async with ClientSession(read, write) as session:
             init_result = await session.initialize()
 
             if not (
