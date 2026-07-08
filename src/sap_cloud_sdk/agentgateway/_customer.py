@@ -56,8 +56,7 @@ _CREDENTIALS_DEFAULT_PATH = "/etc/ums/credentials/credentials"
 
 # Environment variables for transparent mode
 _INTEGRATION_CLIENT_ID_ENV = "INTEGRATION_CLIENT_ID"
-_INTEGRATION_TOKEN_SERVICE_URL_ENV = "INTEGRATION_TOKEN_SERVICE_URL"
-_INTEGRATION_TOKEN_URL_ENV = "INTEGRATION_TOKEN_URL"  # Alternative name
+_INTEGRATION_AUTH_URL_ENV = "INTEGRATION_AUTH_URL"
 _INTEGRATION_GATEWAY_URL_ENV = "INTEGRATION_GATEWAY_URL"
 
 # Resource URN for Agent Gateway token scope (hardcoded - production value)
@@ -140,19 +139,16 @@ def detect_transparent_credentials() -> bool:
 
     Checks for required environment variables:
     - INTEGRATION_CLIENT_ID
-    - INTEGRATION_TOKEN_SERVICE_URL or INTEGRATION_TOKEN_URL
+    - INTEGRATION_AUTH_URL
     - INTEGRATION_GATEWAY_URL
 
     Returns:
         True if all required environment variables are present, False otherwise.
     """
     has_client_id = bool(os.environ.get(_INTEGRATION_CLIENT_ID_ENV))
-    has_token_url = bool(
-        os.environ.get(_INTEGRATION_TOKEN_SERVICE_URL_ENV)
-        or os.environ.get(_INTEGRATION_TOKEN_URL_ENV)
-    )
+    has_auth_url = bool(os.environ.get(_INTEGRATION_AUTH_URL_ENV))
     has_gateway_url = bool(os.environ.get(_INTEGRATION_GATEWAY_URL_ENV))
-    return has_client_id and has_token_url and has_gateway_url
+    return has_client_id and has_auth_url and has_gateway_url
 
 
 def load_customer_credentials_from_env(
@@ -175,7 +171,7 @@ def load_customer_credentials_from_env(
     # Check required environment variables
     required_vars = {
         _INTEGRATION_CLIENT_ID_ENV: "client_id",
-        _INTEGRATION_TOKEN_SERVICE_URL_ENV: "token_service_url",
+        _INTEGRATION_AUTH_URL_ENV: "auth_url",
         _INTEGRATION_GATEWAY_URL_ENV: "gateway_url",
     }
 
@@ -186,15 +182,7 @@ def load_customer_credentials_from_env(
         )
 
     client_id = os.environ[_INTEGRATION_CLIENT_ID_ENV]
-    token_service_url = (
-        os.environ.get(_INTEGRATION_TOKEN_SERVICE_URL_ENV)
-        or os.environ.get(_INTEGRATION_TOKEN_URL_ENV)
-    )
-    if not token_service_url:
-        raise AgentGatewaySDKError(
-            f"Transparent TLS mode requires either {_INTEGRATION_TOKEN_SERVICE_URL_ENV} "
-            f"or {_INTEGRATION_TOKEN_URL_ENV} environment variable"
-        )
+    token_service_url = os.environ[_INTEGRATION_AUTH_URL_ENV]
     gateway_url = os.environ[_INTEGRATION_GATEWAY_URL_ENV].rstrip("/")
 
     # Resolve integration dependencies
@@ -229,7 +217,7 @@ def load_customer_credentials(path: str) -> CustomerCredentials:
         with open(path, "r") as f:
             data = json.load(f)
     except (OSError, json.JSONDecodeError) as e:
-        raise AgentGatewaySDKError(f"Failed to load credentials from '{path}': {e}") from e
+        raise AgentGatewaySDKError(f"Failed to load credentials from '{path}': {e}")
 
     # Map credential file keys to dataclass fields
     # Credential file uses camelCase, we use snake_case
@@ -251,17 +239,16 @@ def load_customer_credentials(path: str) -> CustomerCredentials:
     if _CredentialFields.INTEGRATION_DEPENDENCIES not in data:
         raise AgentGatewaySDKError(
             "Credentials file missing required field: integrationDependencies. "
-            'Expected format: [{"ordId": "...", "globalTenantId": "..."}]'
+            'Expected format: [{"ordId": "...", "data": {"globalTenantId": "..."}}]'
         )
 
     try:
         integration_deps = [
             IntegrationDependency(
                 ord_id=dep[_CredentialFields.ORD_ID],
-                global_tenant_id=(
-                    dep.get(_CredentialFields.GLOBAL_TENANT_ID)
-                    or dep[_CredentialFields.DATA][_CredentialFields.GLOBAL_TENANT_ID]
-                ),
+                global_tenant_id=dep[_CredentialFields.DATA][
+                    _CredentialFields.GLOBAL_TENANT_ID
+                ],
             )
             for dep in data[_CredentialFields.INTEGRATION_DEPENDENCIES]
         ]
@@ -272,8 +259,8 @@ def load_customer_credentials(path: str) -> CustomerCredentials:
     except (KeyError, TypeError) as e:
         raise AgentGatewaySDKError(
             f"Failed to parse integrationDependencies: {e}. "
-            'Expected format: [{"ordId": "...", "globalTenantId": "..."}]'
-        ) from e
+            'Expected format: [{"ordId": "...", "data": {"globalTenantId": "..."}}]'
+        )
 
     return CustomerCredentials(
         token_service_url=data[_CredentialFields.TOKEN_SERVICE_URL],
@@ -329,7 +316,7 @@ def _create_ssl_context(certificate: str, private_key: str) -> ssl.SSLContext:
         return ssl_context
 
     except ssl.SSLError as e:
-        raise AgentGatewaySDKError(f"Failed to create SSL context: {e}") from e
+        raise AgentGatewaySDKError(f"Failed to create SSL context: {e}")
 
     finally:
         # Clean up temporary files
@@ -343,6 +330,7 @@ def _request_token_mtls(
     credentials: CustomerCredentials,
     grant_type: str,
     timeout: float,
+    app_tid: str | None = None,
     extra_data: dict | None = None,
 ) -> dict:
     """Make mTLS token request to IAS.
@@ -351,6 +339,7 @@ def _request_token_mtls(
         credentials: Customer credentials with certificate and private key.
         grant_type: OAuth2 grant type.
         timeout: HTTP timeout in seconds.
+        app_tid: BTP Application Tenant ID of subscriber (optional).
         extra_data: Additional form data for the token request.
 
     Returns:
@@ -367,6 +356,11 @@ def _request_token_mtls(
         "resource": _AGW_RESOURCE_URN,
     }
 
+    # TODO: app_tid requirement is still being clarified with the IBD team.
+    # This parameter may be removed if it turns out to be unnecessary.
+    if app_tid:
+        data["app_tid"] = app_tid
+
     if extra_data:
         data.update(extra_data)
 
@@ -377,52 +371,18 @@ def _request_token_mtls(
     )
 
     try:
-        # Allow disabling SSL server verification for testing with self-signed server certificates
-        # Note: Client certificate is still sent via cert= parameter
-        if os.environ.get("AGW_DISABLE_SSL_VERIFY"):
-            # Create temp files for cert/key to pass to httpx
-            cert_file = tempfile.NamedTemporaryFile(mode="w", suffix=".crt", delete=False)
-            key_file = tempfile.NamedTemporaryFile(mode="w", suffix=".key", delete=False)
-            try:
-                cert_file.write(credentials.certificate)
-                cert_file.close()
-                key_file.write(credentials.private_key)
-                key_file.close()
-
-                with httpx.Client(
-                    verify=False,  # Skip server cert verification
-                    cert=(cert_file.name, key_file.name),  # But still send client cert
-                    timeout=timeout,
-                ) as client:
-                    response = client.post(
-                        credentials.token_service_url,
-                        data=data,
-                        headers={
-                            "Content-Type": "application/x-www-form-urlencoded",
-                            "Accept": "application/json",
-                        },
-                    )
-            finally:
-                # Clean up temp files
-                try:
-                    os.unlink(cert_file.name)
-                    os.unlink(key_file.name)
-                except Exception:
-                    pass
-        else:
-            # Normal path: use SSL context for both server and client certs
-            with httpx.Client(
-                verify=ssl_context,
-                timeout=timeout,
-            ) as client:
-                response = client.post(
-                    credentials.token_service_url,
-                    data=data,
-                    headers={
-                        "Content-Type": "application/x-www-form-urlencoded",
-                        "Accept": "application/json",
-                    },
-                )
+        with httpx.Client(
+            verify=ssl_context,
+            timeout=timeout,
+        ) as client:
+            response = client.post(
+                credentials.token_service_url,
+                data=data,
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Accept": "application/json",
+                },
+            )
 
         if response.status_code != 200:
             logger.error(
@@ -446,7 +406,7 @@ def _request_token_mtls(
         return token_data
 
     except httpx.RequestError as e:
-        raise AgentGatewaySDKError(f"Token request failed: {e}") from e
+        raise AgentGatewaySDKError(f"Token request failed: {e}")
 
 
 def _request_token_transparent(
@@ -493,9 +453,7 @@ def _request_token_transparent(
     )
 
     try:
-        # Allow disabling SSL verification for testing with self-signed certificates
-        verify_ssl = not os.environ.get("AGW_DISABLE_SSL_VERIFY")
-        with httpx.Client(timeout=timeout, verify=verify_ssl) as client:
+        with httpx.Client(timeout=timeout) as client:
             response = client.post(
                 credentials.token_service_url,
                 data=data,
@@ -527,7 +485,7 @@ def _request_token_transparent(
         return token_data
 
     except httpx.RequestError as e:
-        raise AgentGatewaySDKError(f"Token request failed: {e}") from e
+        raise AgentGatewaySDKError(f"Token request failed: {e}")
 
 
 def get_system_token_mtls(
@@ -568,6 +526,7 @@ def get_system_token_mtls(
             credentials,
             grant_type=_GRANT_TYPE_CLIENT_CREDENTIALS,
             timeout=timeout,
+            app_tid=app_tid,
             extra_data={"response_type": "token"},
         )
     else:
@@ -631,17 +590,15 @@ def exchange_user_token(
     if credentials.certificate and credentials.private_key:
         # STANDARD mode: mTLS authentication
         logger.info("Exchanging user token for AGW-scoped token via jwt-bearer grant")
-        extra: dict = {
-            "assertion": user_token,
-            "token_format": "jwt",
-        }
-        if app_tid:
-            extra["app_tid"] = app_tid
         token_data = _request_token_mtls(
             credentials,
             grant_type=_GRANT_TYPE_JWT_BEARER,
             timeout=timeout,
-            extra_data=extra,
+            app_tid=app_tid,
+            extra_data={
+                "assertion": user_token,
+                "token_format": "jwt",
+            },
         )
     else:
         # TRANSPARENT mode: standard HTTPS authentication
@@ -725,92 +682,54 @@ async def _list_server_tools(
             write,
             _,
         ):
-            async with ClientSession(read, write) as session:
-                init_result = await session.initialize()
+        async with ClientSession(read, write) as session:
+            init_result = await session.initialize()
 
-                if not (
-                    init_result
-                    and init_result.serverInfo
-                    and init_result.serverInfo.name
-                ):
-                    raise AgentGatewaySDKError(
-                        f"MCP server at '{url}' did not provide serverInfo.name. "
-                        "This is required by the MCP protocol."
-                    )
+            if not (
+                init_result
+                and init_result.serverInfo
+                and init_result.serverInfo.name
+            ):
+                raise AgentGatewaySDKError(
+                    f"MCP server at '{url}' did not provide serverInfo.name. "
+                    "This is required by the MCP protocol."
+                )
 
-                server_name = init_result.serverInfo.name
-                result = await session.list_tools()
+            server_name = init_result.serverInfo.name
+            result = await session.list_tools()
 
-                return [
-                    MCPTool(
-                        name=t.name,
-                        server_name=server_name,
-                        description=t.description or "",
-                        input_schema=t.inputSchema or {},
-                        url=url,
-                    )
-                    for t in result.tools
-                ]
-
-
-def _resolve_dependency(
-    credentials: CustomerCredentials,
-    ord_id: str,
-) -> IntegrationDependency:
-    """Resolve a single IntegrationDependency by ORD ID.
-
-    Args:
-        credentials: Customer credentials with integrationDependencies.
-        ord_id: ORD ID to look up.
-
-    Returns:
-        The matching IntegrationDependency.
-
-    Raises:
-        AgentGatewaySDKError: If no match is found or multiple entries share the same ORD ID.
-    """
-    matches = [d for d in credentials.integration_dependencies if d.ord_id == ord_id]
-    if not matches:
-        available = ", ".join(d.ord_id for d in credentials.integration_dependencies)
-        raise AgentGatewaySDKError(
-            f"ORD ID '{ord_id}' not found in integrationDependencies. "
-            f"Available: {available or '(none)'}"
-        )
-    if len(matches) > 1:
-        tids = ", ".join(m.global_tenant_id for m in matches)
-        raise AgentGatewaySDKError(
-            f"ORD ID '{ord_id}' matches multiple integrationDependencies with "
-            f"different tenant IDs ({tids}). Specify the tenant ID explicitly."
-        )
-    return matches[0]
+            return [
+                MCPTool(
+                    name=t.name,
+                    server_name=server_name,
+                    description=t.description or "",
+                    input_schema=t.inputSchema or {},
+                    url=url,
+                )
+                for t in result.tools
+            ]
 
 
 async def get_mcp_tools_customer(
     credentials: CustomerCredentials,
     system_token: str,
     timeout: float,
-    ord_id: str | None = None,
 ) -> list[MCPTool]:
-    """List MCP tools from servers defined in credentials.
+    """List all MCP tools from servers defined in credentials.
 
-    When ord_id is given, only tools from that single dependency are returned
-    and the tenant ID is derived automatically from the credentials.
-    When ord_id is omitted, tools from all integrationDependencies are returned.
+    Iterates over all integrationDependencies in the credentials file and
+    discovers tools from each MCP server using a pre-fetched system token.
 
     Args:
         credentials: Customer credentials with integrationDependencies.
         system_token: Pre-fetched raw system token for authentication.
         timeout: HTTP timeout in seconds for MCP server calls.
-        ord_id: Optional ORD ID to filter to a single server. The tenant ID
-            is derived from the credentials — no need to pass it separately.
-            Raises AgentGatewaySDKError if the ORD ID matches multiple entries.
 
     Returns:
-        List of MCPTool objects from the matching server(s).
+        List of MCPTool objects from all servers.
 
     Raises:
-        AgentGatewaySDKError: If integrationDependencies is empty, or if ord_id
-            is given but not found or matches multiple tenant IDs.
+        AgentGatewaySDKError: If integrationDependencies is empty.
     """
     dependencies = credentials.integration_dependencies
 
@@ -818,9 +737,6 @@ async def get_mcp_tools_customer(
         raise AgentGatewaySDKError(
             "integrationDependencies is empty in credentials — no MCP servers configured."
         )
-
-    if ord_id is not None:
-        dependencies = [_resolve_dependency(credentials, ord_id)]
 
     logger.info("Discovering tools from %d MCP server(s)", len(dependencies))
 
@@ -882,13 +798,28 @@ async def call_mcp_tool_customer(
             write,
             _,
         ):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                result = await session.call_tool(tool.name, kwargs)
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            result = await session.call_tool(tool.name, kwargs)
 
-                if not result.content:
-                    logger.warning("Tool '%s' returned empty content", tool.name)
-                    return ""
+            # Defensive check: MCP library may return None for failed calls
+            if result is None:
+                logger.error("Tool '%s' returned None result", tool.name)
+                raise AgentGatewaySDKError(
+                    f"MCP tool '{tool.name}' returned no result. "
+                    "This may indicate a network timeout, protocol error, or invalid tool arguments."
+                )
 
-                first = result.content[0]
-                return str(getattr(first, "text", ""))
+            # Check if the result indicates an error
+            if hasattr(result, "isError") and result.isError:
+                logger.error("Tool '%s' returned error result", tool.name)
+                raise AgentGatewaySDKError(
+                    f"MCP tool '{tool.name}' returned an error: {result}"
+                )
+
+            if not result.content:
+                logger.warning("Tool '%s' returned empty content", tool.name)
+                return ""
+
+            first = result.content[0]
+            return str(getattr(first, "text", ""))

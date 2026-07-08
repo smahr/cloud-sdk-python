@@ -114,33 +114,6 @@ def _fetch_auth_token(
     return raw_token, gateway_url
 
 
-def get_ias_client_id_lob() -> str:
-    """Read the IAS client ID from the IAS destination properties (LoB flow).
-
-    Fetches the IAS destination (``sap-managed-runtime-ias-{landscape}``)
-    at provider subaccount level with ``$skipTokenRetrieval=true`` so only
-    destination properties are returned — no auth token exchange is performed.
-
-    Returns:
-        The IAS client ID string, or ``""`` if the ``clientId`` property is absent.
-
-    Raises:
-        EnvironmentError: If ``APPFND_CONHOS_LANDSCAPE`` is not set.
-        AgentGatewaySDKError: If the IAS destination is not found.
-        Any exception raised by the destination client.
-    """
-    dest_name = _ias_dest_name()
-    client = create_destination_client(instance=_DESTINATION_INSTANCE)
-    dest = client.get_destination(
-        dest_name,
-        level=ConsumptionLevel.PROVIDER_SUBACCOUNT,
-        options=ConsumptionOptions(skip_token_retrieval=True),
-    )
-    if not dest:
-        raise AgentGatewaySDKError(f"IAS destination '{dest_name}' not found")
-    return dest.properties.get("clientId", "")
-
-
 async def fetch_system_auth(
     tenant_subdomain: str,
     token_cache: _TokenCache | None = None,
@@ -308,27 +281,27 @@ async def list_server_tools(
             write,
             _,
         ):
-            async with ClientSession(read, write) as session:
-                init_result = await session.initialize()
-                server_name = (
-                    init_result.serverInfo.name
-                    if init_result
-                    and init_result.serverInfo
-                    and init_result.serverInfo.name
-                    else fragment_name
+        async with ClientSession(read, write) as session:
+            init_result = await session.initialize()
+            server_name = (
+                init_result.serverInfo.name
+                if init_result
+                and init_result.serverInfo
+                and init_result.serverInfo.name
+                else fragment_name
+            )
+            result = await session.list_tools()
+            return [
+                MCPTool(
+                    name=t.name,
+                    server_name=server_name,
+                    description=t.description or "",
+                    input_schema=t.inputSchema or {},
+                    url=dest_url,
+                    fragment_name=fragment_name,
                 )
-                result = await session.list_tools()
-                return [
-                    MCPTool(
-                        name=t.name,
-                        server_name=server_name,
-                        description=t.description or "",
-                        input_schema=t.inputSchema or {},
-                        url=dest_url,
-                        fragment_name=fragment_name,
-                    )
-                    for t in result.tools
-                    ]
+                for t in result.tools
+            ]
 
 
 async def get_mcp_tools_lob(
@@ -422,14 +395,30 @@ async def call_mcp_tool_lob(
             write,
             _,
         ):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                result = await session.call_tool(tool.name, kwargs)
-                if not result.content:
-                    logger.warning("Tool '%s' returned empty content", tool.name)
-                    return ""
-                first = result.content[0]
-                return str(getattr(first, "text", ""))
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            result = await session.call_tool(tool.name, kwargs)
+
+            # Defensive check: MCP library may return None for failed calls
+            if result is None:
+                logger.error("Tool '%s' returned None result", tool.name)
+                raise AgentGatewaySDKError(
+                    f"MCP tool '{tool.name}' returned no result. "
+                    "This may indicate a network timeout, protocol error, or invalid tool arguments."
+                )
+
+            # Check if the result indicates an error
+            if hasattr(result, "isError") and result.isError:
+                logger.error("Tool '%s' returned error result", tool.name)
+                raise AgentGatewaySDKError(
+                    f"MCP tool '{tool.name}' returned an error: {result}"
+                )
+
+            if not result.content:
+                logger.warning("Tool '%s' returned empty content", tool.name)
+                return ""
+            first = result.content[0]
+            return str(getattr(first, "text", ""))
 
 
 async def _fetch_agent_card(
