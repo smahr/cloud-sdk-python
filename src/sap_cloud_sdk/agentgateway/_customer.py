@@ -683,31 +683,31 @@ async def _list_server_tools(
             _,
         ):
             async with ClientSession(read, write) as session:
-            init_result = await session.initialize()
+                init_result = await session.initialize()
 
-            if not (
-                init_result
-                and init_result.serverInfo
-                and init_result.serverInfo.name
-            ):
-                raise AgentGatewaySDKError(
-                    f"MCP server at '{url}' did not provide serverInfo.name. "
-                    "This is required by the MCP protocol."
-                )
+                if not (
+                    init_result
+                    and init_result.serverInfo
+                    and init_result.serverInfo.name
+                ):
+                    raise AgentGatewaySDKError(
+                        f"MCP server at '{url}' did not provide serverInfo.name. "
+                        "This is required by the MCP protocol."
+                    )
 
-            server_name = init_result.serverInfo.name
-            result = await session.list_tools()
+                server_name = init_result.serverInfo.name
+                result = await session.list_tools()
 
-            return [
-                MCPTool(
-                    name=t.name,
-                    server_name=server_name,
-                    description=t.description or "",
-                    input_schema=t.inputSchema or {},
-                    url=url,
-                )
-                for t in result.tools
-            ]
+                return [
+                    MCPTool(
+                        name=t.name,
+                        server_name=server_name,
+                        description=t.description or "",
+                        input_schema=t.inputSchema or {},
+                        url=url,
+                    )
+                    for t in result.tools
+                ]
 
 
 async def get_mcp_tools_customer(
