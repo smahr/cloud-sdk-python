@@ -835,7 +835,7 @@ class TestLoadCustomerCredentialsFromEnv:
             [
                 {
                     "ordId": "sap.example:apiResource:demo:v1",
-                    "data": {"globalTenantId": "123456"},
+                    "globalTenantId": "123456",
                 }
             ]
         )
@@ -862,7 +862,7 @@ class TestLoadCustomerCredentialsFromEnv:
 
     def test_raises_when_client_id_missing(self):
         """Raise error when INTEGRATION_CLIENT_ID is missing."""
-        deps_json = json.dumps([{"ordId": "test", "data": {"globalTenantId": "123"}}])
+        deps_json = json.dumps([{"ordId": "test", "globalTenantId": "123"}])
 
         with patch.dict(
             os.environ,
@@ -883,7 +883,7 @@ class TestLoadCustomerCredentialsFromEnv:
 
     def test_raises_when_token_service_url_missing(self):
         """Raise error when INTEGRATION_TOKEN_SERVICE_URL is missing."""
-        deps_json = json.dumps([{"ordId": "test", "data": {"globalTenantId": "123"}}])
+        deps_json = json.dumps([{"ordId": "test", "globalTenantId": "123"}])
 
         with patch.dict(
             os.environ,
@@ -904,7 +904,7 @@ class TestLoadCustomerCredentialsFromEnv:
 
     def test_raises_when_gateway_url_missing(self):
         """Raise error when INTEGRATION_GATEWAY_URL is missing."""
-        deps_json = json.dumps([{"ordId": "test", "data": {"globalTenantId": "123"}}])
+        deps_json = json.dumps([{"ordId": "test", "globalTenantId": "123"}])
 
         with patch.dict(
             os.environ,

@@ -80,13 +80,25 @@ class EnvironmentDependenciesResolver(IntegrationDependenciesResolver):
             )
 
         try:
-            dependencies = [
-                IntegrationDependency(
-                    ord_id=dep["ordId"],
-                    global_tenant_id=dep["globalTenantId"],
+            dependencies = []
+            for dep in data:
+                ord_id = dep["ordId"]
+                # Support both flat format and nested format (from credentials file)
+                # Flat: {"ordId": "...", "globalTenantId": "..."}
+                # Nested: {"ordId": "...", "data": {"globalTenantId": "..."}}
+                if "globalTenantId" in dep:
+                    global_tenant_id = dep["globalTenantId"]
+                elif "data" in dep and isinstance(dep["data"], dict):
+                    global_tenant_id = dep["data"]["globalTenantId"]
+                else:
+                    raise KeyError("globalTenantId not found in dependency")
+
+                dependencies.append(
+                    IntegrationDependency(
+                        ord_id=ord_id,
+                        global_tenant_id=global_tenant_id,
+                    )
                 )
-                for dep in data
-            ]
             logger.debug(
                 "Loaded %d integration dependencies from environment",
                 len(dependencies),
@@ -95,5 +107,6 @@ class EnvironmentDependenciesResolver(IntegrationDependenciesResolver):
         except (KeyError, TypeError) as e:
             raise AgentGatewaySDKError(
                 f"Invalid format in {_INTEGRATION_DEPENDENCIES_ENV}: {e}. "
-                'Expected format: [{"ordId": "...", "globalTenantId": "..."}]'
+                'Expected format: [{"ordId": "...", "globalTenantId": "..."}] or '
+                '[{"ordId": "...", "data": {"globalTenantId": "..."}}]'
             ) from e
