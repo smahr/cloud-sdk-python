@@ -56,8 +56,7 @@ _CREDENTIALS_DEFAULT_PATH = "/etc/ums/credentials/credentials"
 
 # Environment variables for transparent mode
 _INTEGRATION_CLIENT_ID_ENV = "INTEGRATION_CLIENT_ID"
-_INTEGRATION_TOKEN_SERVICE_URL_ENV = "INTEGRATION_TOKEN_SERVICE_URL"
-_INTEGRATION_TOKEN_URL_ENV = "INTEGRATION_TOKEN_URL"  # Alternative name
+_INTEGRATION_AUTH_URL_ENV = "INTEGRATION_AUTH_URL"
 _INTEGRATION_GATEWAY_URL_ENV = "INTEGRATION_GATEWAY_URL"
 
 # Resource URN for Agent Gateway token scope (hardcoded - production value)
@@ -140,19 +139,16 @@ def detect_transparent_credentials() -> bool:
 
     Checks for required environment variables:
     - INTEGRATION_CLIENT_ID
-    - INTEGRATION_TOKEN_SERVICE_URL or INTEGRATION_TOKEN_URL
+    - INTEGRATION_AUTH_URL
     - INTEGRATION_GATEWAY_URL
 
     Returns:
         True if all required environment variables are present, False otherwise.
     """
     has_client_id = bool(os.environ.get(_INTEGRATION_CLIENT_ID_ENV))
-    has_token_url = bool(
-        os.environ.get(_INTEGRATION_TOKEN_SERVICE_URL_ENV)
-        or os.environ.get(_INTEGRATION_TOKEN_URL_ENV)
-    )
+    has_auth_url = bool(os.environ.get(_INTEGRATION_AUTH_URL_ENV))
     has_gateway_url = bool(os.environ.get(_INTEGRATION_GATEWAY_URL_ENV))
-    return has_client_id and has_token_url and has_gateway_url
+    return has_client_id and has_auth_url and has_gateway_url
 
 
 def load_customer_credentials_from_env(
@@ -175,7 +171,7 @@ def load_customer_credentials_from_env(
     # Check required environment variables
     required_vars = {
         _INTEGRATION_CLIENT_ID_ENV: "client_id",
-        _INTEGRATION_TOKEN_SERVICE_URL_ENV: "token_service_url",
+        _INTEGRATION_AUTH_URL_ENV: "auth_url",
         _INTEGRATION_GATEWAY_URL_ENV: "gateway_url",
     }
 
@@ -186,15 +182,7 @@ def load_customer_credentials_from_env(
         )
 
     client_id = os.environ[_INTEGRATION_CLIENT_ID_ENV]
-    token_service_url = (
-        os.environ.get(_INTEGRATION_TOKEN_SERVICE_URL_ENV)
-        or os.environ.get(_INTEGRATION_TOKEN_URL_ENV)
-    )
-    if not token_service_url:
-        raise AgentGatewaySDKError(
-            f"Transparent TLS mode requires either {_INTEGRATION_TOKEN_SERVICE_URL_ENV} "
-            f"or {_INTEGRATION_TOKEN_URL_ENV} environment variable"
-        )
+    token_service_url = os.environ[_INTEGRATION_AUTH_URL_ENV]
     gateway_url = os.environ[_INTEGRATION_GATEWAY_URL_ENV].rstrip("/")
 
     # Resolve integration dependencies
