@@ -235,33 +235,31 @@ def load_customer_credentials(path: str) -> CustomerCredentials:
             f"Credentials file missing required fields: {missing}"
         )
 
-    # Parse integrationDependencies (required)
-    if _CredentialFields.INTEGRATION_DEPENDENCIES not in data:
-        raise AgentGatewaySDKError(
-            "Credentials file missing required field: integrationDependencies. "
-            'Expected format: [{"ordId": "...", "globalTenantId": "..."}]'
-        )
-
-    try:
-        integration_deps = [
-            IntegrationDependency(
-                ord_id=dep[_CredentialFields.ORD_ID],
-                global_tenant_id=(
-                    dep.get(_CredentialFields.GLOBAL_TENANT_ID)
-                    or dep[_CredentialFields.DATA][_CredentialFields.GLOBAL_TENANT_ID]
-                ),
+    # Parse integrationDependencies (optional, defaults to empty array)
+    integration_deps = []
+    if _CredentialFields.INTEGRATION_DEPENDENCIES in data:
+        try:
+            integration_deps = [
+                IntegrationDependency(
+                    ord_id=dep[_CredentialFields.ORD_ID],
+                    global_tenant_id=(
+                        dep.get(_CredentialFields.GLOBAL_TENANT_ID)
+                        or dep[_CredentialFields.DATA][_CredentialFields.GLOBAL_TENANT_ID]
+                    ),
+                )
+                for dep in data[_CredentialFields.INTEGRATION_DEPENDENCIES]
+            ]
+            logger.debug(
+                "Loaded %d integration dependencies from credentials",
+                len(integration_deps),
             )
-            for dep in data[_CredentialFields.INTEGRATION_DEPENDENCIES]
-        ]
-        logger.debug(
-            "Loaded %d integration dependencies from credentials",
-            len(integration_deps),
-        )
-    except (KeyError, TypeError) as e:
-        raise AgentGatewaySDKError(
-            f"Failed to parse integrationDependencies: {e}. "
-            'Expected format: [{"ordId": "...", "globalTenantId": "..."}]'
-        ) from e
+        except (KeyError, TypeError) as e:
+            raise AgentGatewaySDKError(
+                f"Failed to parse integrationDependencies: {e}. "
+                'Expected format: [{"ordId": "...", "data": {"globalTenantId": "..."}}]'
+            ) from e
+    else:
+        logger.debug("No integrationDependencies found in credentials file")
 
     return CustomerCredentials(
         token_service_url=data[_CredentialFields.TOKEN_SERVICE_URL],

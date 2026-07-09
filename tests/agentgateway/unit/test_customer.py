@@ -923,8 +923,8 @@ class TestLoadCustomerCredentialsFromEnv:
             ):
                 load_customer_credentials_from_env()
 
-    def test_raises_when_dependencies_missing(self):
-        """Raise error when INTEGRATION_DEPENDENCIES is missing."""
+    def test_empty_dependencies_when_env_var_missing(self):
+        """Return empty integration dependencies when INTEGRATION_DEPENDENCIES is not set."""
         with patch.dict(
             os.environ,
             {
@@ -936,11 +936,10 @@ class TestLoadCustomerCredentialsFromEnv:
         ):
             os.environ.pop("INTEGRATION_DEPENDENCIES", None)
 
-            with pytest.raises(
-                AgentGatewaySDKError,
-                match="Missing required environment variable: INTEGRATION_DEPENDENCIES",
-            ):
-                load_customer_credentials_from_env()
+            result = load_customer_credentials_from_env()
+
+            assert result.client_id == "test-client"
+            assert len(result.integration_dependencies) == 0
 
     def test_uses_custom_dependencies_resolver(self):
         """Use custom dependencies resolver when provided."""

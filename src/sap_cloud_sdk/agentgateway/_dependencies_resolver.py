@@ -54,18 +54,17 @@ class EnvironmentDependenciesResolver(IntegrationDependenciesResolver):
         """Load integration dependencies from INTEGRATION_DEPENDENCIES env var.
 
         Returns:
-            List of IntegrationDependency objects.
+            List of IntegrationDependency objects. Returns empty list if env var is not set.
 
         Raises:
-            AgentGatewaySDKError: If environment variable is missing or invalid.
+            AgentGatewaySDKError: If environment variable format is invalid.
         """
         raw_value = os.environ.get(_INTEGRATION_DEPENDENCIES_ENV)
 
+        # If not set, return empty array (valid case - no integration dependencies)
         if not raw_value:
-            raise AgentGatewaySDKError(
-                f"Missing required environment variable: {_INTEGRATION_DEPENDENCIES_ENV}. "
-                'Expected format: [{"ordId": "...", "globalTenantId": "..."}]'
-            )
+            logger.debug("INTEGRATION_DEPENDENCIES not set, returning empty list")
+            return []
 
         try:
             data = json.loads(raw_value)
@@ -80,25 +79,13 @@ class EnvironmentDependenciesResolver(IntegrationDependenciesResolver):
             )
 
         try:
-            dependencies = []
-            for dep in data:
-                ord_id = dep["ordId"]
-                # Support both flat format and nested format (from credentials file)
-                # Flat: {"ordId": "...", "globalTenantId": "..."}
-                # Nested: {"ordId": "...", "data": {"globalTenantId": "..."}}
-                if "globalTenantId" in dep:
-                    global_tenant_id = dep["globalTenantId"]
-                elif "data" in dep and isinstance(dep["data"], dict):
-                    global_tenant_id = dep["data"]["globalTenantId"]
-                else:
-                    raise KeyError("globalTenantId not found in dependency")
-
-                dependencies.append(
-                    IntegrationDependency(
-                        ord_id=ord_id,
-                        global_tenant_id=global_tenant_id,
-                    )
+            dependencies = [
+                IntegrationDependency(
+                    ord_id=dep["ordId"],
+                    global_tenant_id=dep["globalTenantId"],
                 )
+                for dep in data
+            ]
             logger.debug(
                 "Loaded %d integration dependencies from environment",
                 len(dependencies),
@@ -107,6 +94,5 @@ class EnvironmentDependenciesResolver(IntegrationDependenciesResolver):
         except (KeyError, TypeError) as e:
             raise AgentGatewaySDKError(
                 f"Invalid format in {_INTEGRATION_DEPENDENCIES_ENV}: {e}. "
-                'Expected format: [{"ordId": "...", "globalTenantId": "..."}] or '
-                '[{"ordId": "...", "data": {"globalTenantId": "..."}}]'
+                'Expected format: [{"ordId": "...", "globalTenantId": "..."}]'
             ) from e
