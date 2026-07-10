@@ -15,10 +15,8 @@ from sap_cloud_sdk.agentgateway._customer import (
     get_mcp_tools_customer,
     call_mcp_tool_customer,
     _build_mcp_url,
-    _CREDENTIALS_PATH_ENV,
-    _CREDENTIALS_DEFAULT_PATH,
     _INTEGRATION_CLIENT_ID_ENV,
-    _INTEGRATION_TOKEN_SERVICE_URL_ENV,
+    _INTEGRATION_AUTH_URL_ENV,
     _INTEGRATION_GATEWAY_URL_ENV,
 )
 from sap_cloud_sdk.agentgateway._models import (
@@ -39,62 +37,43 @@ from sap_cloud_sdk.agentgateway.exceptions import AgentGatewaySDKError
 class TestDetectCustomerAgentCredentials:
     """Tests for customer agent credential detection."""
 
-    def test_detect_from_env_var_path(self, tmp_path):
-        """Detect credentials from path specified in environment variable."""
-        creds_file = tmp_path / "credentials.json"
+    def test_detect_from_servicebinding_root(self, tmp_path):
+        """Detect credentials via servicebinding.io scan of SERVICE_BINDING_ROOT."""
+        binding_dir = tmp_path / "my-binding"
+        binding_dir.mkdir()
+        (binding_dir / "type").write_text("integration-credentials")
+        creds_file = binding_dir / "credentials"
         creds_file.write_text('{"clientid": "test"}')
 
-        with patch.dict(os.environ, {_CREDENTIALS_PATH_ENV: str(creds_file)}):
+        with patch(
+            "sap_cloud_sdk.agentgateway._customer.resolve_base_mount",
+            return_value=str(tmp_path),
+        ):
             result = detect_customer_agent_credentials()
             assert result == str(creds_file)
 
-    def test_detect_from_env_var_path_file_not_exists(self):
-        """Return None when env var path doesn't exist."""
-        with patch.dict(os.environ, {_CREDENTIALS_PATH_ENV: "/nonexistent/path"}):
+    def test_skips_binding_with_wrong_type(self, tmp_path):
+        """Return None when binding type does not match integration-credentials."""
+        binding_dir = tmp_path / "other-binding"
+        binding_dir.mkdir()
+        (binding_dir / "type").write_text("some-other-type")
+        (binding_dir / "credentials").write_text('{"clientid": "test"}')
+
+        with patch(
+            "sap_cloud_sdk.agentgateway._customer.resolve_base_mount",
+            return_value=str(tmp_path),
+        ):
             result = detect_customer_agent_credentials()
             assert result is None
 
-    def test_detect_from_default_path(self):
-        """Detect credentials from default mounted path."""
-        with patch.dict(os.environ, {}, clear=False):
-            # Remove env var if present
-            os.environ.pop(_CREDENTIALS_PATH_ENV, None)
-
-            with patch("os.path.isfile") as mock_isfile:
-                mock_isfile.side_effect = lambda p: p == _CREDENTIALS_DEFAULT_PATH
-
-                result = detect_customer_agent_credentials()
-                assert result == _CREDENTIALS_DEFAULT_PATH
-
     def test_no_credentials_returns_none(self):
-        """Return None when no credentials are found."""
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop(_CREDENTIALS_PATH_ENV, None)
-
-            with patch("os.path.isfile", return_value=False):
-                result = detect_customer_agent_credentials()
-                assert result is None
-
-    def test_env_var_takes_priority_over_default(self, tmp_path):
-        """Env var path should take priority over default path."""
-        creds_file = tmp_path / "custom_credentials.json"
-        creds_file.write_text('{"clientid": "custom"}')
-
-        with patch.dict(os.environ, {_CREDENTIALS_PATH_ENV: str(creds_file)}):
-            # Even if default path exists, env var should be used
-            with patch("os.path.isfile") as mock_isfile:
-
-                def isfile_side_effect(path):
-                    if path == str(creds_file):
-                        return True
-                    if path == _CREDENTIALS_DEFAULT_PATH:
-                        return True
-                    return False
-
-                mock_isfile.side_effect = isfile_side_effect
-
-                result = detect_customer_agent_credentials()
-                assert result == str(creds_file)
+        """Return None when SERVICE_BINDING_ROOT does not exist."""
+        with patch(
+            "sap_cloud_sdk.agentgateway._customer.resolve_base_mount",
+            return_value=None,
+        ):
+            result = detect_customer_agent_credentials()
+            assert result is None
 
 
 # ============================================================
@@ -762,7 +741,7 @@ class TestDetectTransparentCredentials:
             os.environ,
             {
                 _INTEGRATION_CLIENT_ID_ENV: "test-client",
-                _INTEGRATION_TOKEN_SERVICE_URL_ENV: "https://ias.example.com/oauth2/token",
+                _INTEGRATION_AUTH_URL_ENV: "https://ias.example.com/oauth2/token",
                 _INTEGRATION_GATEWAY_URL_ENV: "https://agw.example.com",
             },
         ):
@@ -774,7 +753,7 @@ class TestDetectTransparentCredentials:
         with patch.dict(
             os.environ,
             {
-                _INTEGRATION_TOKEN_SERVICE_URL_ENV: "https://ias.example.com/oauth2/token",
+                _INTEGRATION_AUTH_URL_ENV: "https://ias.example.com/oauth2/token",
                 _INTEGRATION_GATEWAY_URL_ENV: "https://agw.example.com",
             },
             clear=False,
@@ -793,7 +772,7 @@ class TestDetectTransparentCredentials:
             },
             clear=False,
         ):
-            os.environ.pop(_INTEGRATION_TOKEN_SERVICE_URL_ENV, None)
+            os.environ.pop(_INTEGRATION_AUTH_URL_ENV, None)
             result = detect_transparent_credentials()
             assert result is False
 
@@ -803,7 +782,7 @@ class TestDetectTransparentCredentials:
             os.environ,
             {
                 _INTEGRATION_CLIENT_ID_ENV: "test-client",
-                _INTEGRATION_TOKEN_SERVICE_URL_ENV: "https://ias.example.com/oauth2/token",
+                _INTEGRATION_AUTH_URL_ENV: "https://ias.example.com/oauth2/token",
             },
             clear=False,
         ):
@@ -815,7 +794,7 @@ class TestDetectTransparentCredentials:
         """Return False when all environment variables are missing."""
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop(_INTEGRATION_CLIENT_ID_ENV, None)
-            os.environ.pop(_INTEGRATION_TOKEN_SERVICE_URL_ENV, None)
+            os.environ.pop(_INTEGRATION_AUTH_URL_ENV, None)
             os.environ.pop(_INTEGRATION_GATEWAY_URL_ENV, None)
             result = detect_transparent_credentials()
             assert result is False
@@ -844,7 +823,7 @@ class TestLoadCustomerCredentialsFromEnv:
             os.environ,
             {
                 _INTEGRATION_CLIENT_ID_ENV: "test-client-id",
-                _INTEGRATION_TOKEN_SERVICE_URL_ENV: "https://ias.example.com/oauth2/token",
+                _INTEGRATION_AUTH_URL_ENV: "https://ias.example.com/oauth2/token",
                 _INTEGRATION_GATEWAY_URL_ENV: "https://agw.example.com/",
                 "INTEGRATION_DEPENDENCIES": deps_json,
             },
@@ -867,7 +846,7 @@ class TestLoadCustomerCredentialsFromEnv:
         with patch.dict(
             os.environ,
             {
-                _INTEGRATION_TOKEN_SERVICE_URL_ENV: "https://ias.example.com/oauth2/token",
+                _INTEGRATION_AUTH_URL_ENV: "https://ias.example.com/oauth2/token",
                 _INTEGRATION_GATEWAY_URL_ENV: "https://agw.example.com",
                 "INTEGRATION_DEPENDENCIES": deps_json,
             },
@@ -894,7 +873,7 @@ class TestLoadCustomerCredentialsFromEnv:
             },
             clear=False,
         ):
-            os.environ.pop(_INTEGRATION_TOKEN_SERVICE_URL_ENV, None)
+            os.environ.pop(_INTEGRATION_AUTH_URL_ENV, None)
 
             with pytest.raises(
                 AgentGatewaySDKError,
@@ -910,7 +889,7 @@ class TestLoadCustomerCredentialsFromEnv:
             os.environ,
             {
                 _INTEGRATION_CLIENT_ID_ENV: "test-client",
-                _INTEGRATION_TOKEN_SERVICE_URL_ENV: "https://ias.example.com/oauth2/token",
+                _INTEGRATION_AUTH_URL_ENV: "https://ias.example.com/oauth2/token",
                 "INTEGRATION_DEPENDENCIES": deps_json,
             },
             clear=False,
@@ -929,7 +908,7 @@ class TestLoadCustomerCredentialsFromEnv:
             os.environ,
             {
                 _INTEGRATION_CLIENT_ID_ENV: "test-client",
-                _INTEGRATION_TOKEN_SERVICE_URL_ENV: "https://ias.example.com/oauth2/token",
+                _INTEGRATION_AUTH_URL_ENV: "https://ias.example.com/oauth2/token",
                 _INTEGRATION_GATEWAY_URL_ENV: "https://agw.example.com",
             },
             clear=False,
@@ -961,7 +940,7 @@ class TestLoadCustomerCredentialsFromEnv:
             os.environ,
             {
                 _INTEGRATION_CLIENT_ID_ENV: "test-client",
-                _INTEGRATION_TOKEN_SERVICE_URL_ENV: "https://ias.example.com/oauth2/token",
+                _INTEGRATION_AUTH_URL_ENV: "https://ias.example.com/oauth2/token",
                 _INTEGRATION_GATEWAY_URL_ENV: "https://agw.example.com",
             },
         ):

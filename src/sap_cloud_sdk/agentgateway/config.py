@@ -1,27 +1,12 @@
 """Configuration for Agent Gateway client."""
 
 from dataclasses import dataclass
-from enum import Enum
 
 DEFAULT_TIMEOUT_SECONDS = 60.0
 DEFAULT_FALLBACK_TOKEN_TTL_SECONDS = 300.0
 DEFAULT_TOKEN_EXPIRY_BUFFER_SECONDS = 30.0
 DEFAULT_MAX_SYSTEM_TOKEN_CACHE_SIZE = 32
 DEFAULT_MAX_USER_TOKEN_CACHE_SIZE = 256
-
-
-class TlsMode(Enum):
-    """TLS authentication mode for customer agents.
-
-    Attributes:
-        STANDARD: File-based credentials with mTLS authentication (default).
-            Requires certificate and private key from credentials file.
-        TRANSPARENT: Environment-based credentials with standard HTTPS.
-            Gateway handles mTLS externally, SDK uses standard HTTPS.
-    """
-
-    STANDARD = "standard"
-    TRANSPARENT = "transparent"
 
 
 @dataclass
