@@ -75,7 +75,6 @@ class _CredentialFields:
     GATEWAY_URL = "gatewayUrl"
     INTEGRATION_DEPENDENCIES = "integrationDependencies"
     ORD_ID = "ordId"
-    DATA = "data"
     GLOBAL_TENANT_ID = "globalTenantId"
 
 
@@ -217,18 +216,14 @@ def load_customer_credentials(path: str) -> CustomerCredentials:
     if _CredentialFields.INTEGRATION_DEPENDENCIES not in data:
         raise AgentGatewaySDKError(
             "Credentials file missing required field: integrationDependencies. "
-            'Expected format: [{"ordId": "...", "data": {"globalTenantId": "..."}}]'
+            'Expected format: [{"ordId": "...", "globalTenantId": "..."}]'
         )
 
     try:
         integration_deps = [
             IntegrationDependency(
                 ord_id=dep[_CredentialFields.ORD_ID],
-                global_tenant_id=(
-                    dep[_CredentialFields.GLOBAL_TENANT_ID]
-                    if _CredentialFields.GLOBAL_TENANT_ID in dep
-                    else dep[_CredentialFields.DATA][_CredentialFields.GLOBAL_TENANT_ID]
-                ),
+                global_tenant_id=dep[_CredentialFields.GLOBAL_TENANT_ID],
             )
             for dep in data[_CredentialFields.INTEGRATION_DEPENDENCIES]
         ]
@@ -239,8 +234,7 @@ def load_customer_credentials(path: str) -> CustomerCredentials:
     except (KeyError, TypeError) as e:
         raise AgentGatewaySDKError(
             f"Failed to parse integrationDependencies: {e}. "
-            'Expected format: [{"ordId": "...", "globalTenantId": "..."}] '
-            'or [{"ordId": "...", "data": {"globalTenantId": "..."}}]'
+            'Expected format: [{"ordId": "...", "globalTenantId": "..."}]'
         )
 
     return CustomerCredentials(
