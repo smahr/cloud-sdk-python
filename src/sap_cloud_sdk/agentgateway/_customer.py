@@ -34,14 +34,10 @@ from sap_cloud_sdk.agentgateway._models import (
     MCPTool,
 )
 from sap_cloud_sdk.agentgateway._token_cache import _TokenCache
-from sap_cloud_sdk.agentgateway.config import TlsMode
 from sap_cloud_sdk.agentgateway.exceptions import AgentGatewaySDKError
 from sap_cloud_sdk.core.secret_resolver import resolve_base_mount
 
 logger = logging.getLogger(__name__)
-
-# Environment variable to override default credential path (points directly to credentials file)
-_CREDENTIALS_PATH_ENV = "AGW_CREDENTIALS_PATH"
 
 # servicebinding.io: scan $SERVICE_BINDING_ROOT for a binding whose 'type' file equals the expected type
 _BINDING_TYPE = "integration-credentials"
@@ -50,9 +46,6 @@ _CREDENTIALS_FILE = "credentials"
 
 # Kyma default when SERVICE_BINDING_ROOT is not set
 _DEFAULT_BINDING_ROOT = "/bindings"
-
-# Deprecated: Old default credential path (kept for backward compatibility with tests)
-_CREDENTIALS_DEFAULT_PATH = "/etc/ums/credentials/credentials"
 
 # Environment variables for transparent mode
 _INTEGRATION_CLIENT_ID_ENV = "INTEGRATION_CLIENT_ID"
@@ -67,9 +60,9 @@ _GRANT_TYPE_CLIENT_CREDENTIALS = "client_credentials"
 _GRANT_TYPE_JWT_BEARER = "urn:ietf:params:oauth:grant-type:jwt-bearer"
 
 
-def _cache_scope_key(credentials: CustomerCredentials, app_tid: str | None) -> str:
+def _cache_scope_key(credentials: CustomerCredentials) -> str:
     """Build a cache scope key for customer-flow tokens."""
-    return f"customer::{credentials.client_id}::{app_tid or ''}"
+    return f"customer::{credentials.client_id}"
 
 
 class _CredentialFields:
@@ -90,21 +83,15 @@ def detect_customer_agent_credentials() -> str | None:
     """Check if customer agent credentials file exists.
 
     Checks for credential file in the following order:
-    1. Path specified in AGW_CREDENTIALS_PATH env var (explicit override, points to file directly)
-    2. $SERVICE_BINDING_ROOT (or /bindings if unset): scans all subdirectories for one whose
+    1. $SERVICE_BINDING_ROOT (or /bindings if unset): scans all subdirectories for one whose
        'type' file contains 'integration-credentials', then reads 'credentials' from that directory
-    3. Default path /etc/ums/credentials/credentials (legacy, for backward compatibility)
+    2. Default path /etc/ums/credentials/credentials (legacy, for backward compatibility)
 
     Returns:
         Path to credentials file if found, None otherwise.
     """
-    # 1. Explicit override via env var
-    path_from_env = os.environ.get(_CREDENTIALS_PATH_ENV)
-    if path_from_env and os.path.isfile(path_from_env):
-        logger.debug("Customer credentials found at env var path: %s", path_from_env)
-        return path_from_env
 
-    # 2. servicebinding.io: scan $SERVICE_BINDING_ROOT for a binding whose 'type' file equals _BINDING_TYPE
+    # 1. servicebinding.io: scan $SERVICE_BINDING_ROOT for a binding whose 'type' file equals _BINDING_TYPE
     sbr = resolve_base_mount(_DEFAULT_BINDING_ROOT)
     if sbr and os.path.isdir(sbr):
         for entry in os.scandir(sbr):
@@ -123,13 +110,6 @@ def detect_customer_agent_credentials() -> str | None:
                     credentials_path,
                 )
                 return credentials_path
-
-    # 3. Check legacy default mounted path (backward compatibility)
-    if os.path.isfile(_CREDENTIALS_DEFAULT_PATH):
-        logger.debug(
-            "Customer credentials found at legacy default path: %s", _CREDENTIALS_DEFAULT_PATH
-        )
-        return _CREDENTIALS_DEFAULT_PATH
 
     return None
 
@@ -330,7 +310,6 @@ def _request_token_mtls(
     credentials: CustomerCredentials,
     grant_type: str,
     timeout: float,
-    app_tid: str | None = None,
     extra_data: dict | None = None,
 ) -> dict:
     """Make mTLS token request to IAS.
@@ -339,7 +318,6 @@ def _request_token_mtls(
         credentials: Customer credentials with certificate and private key.
         grant_type: OAuth2 grant type.
         timeout: HTTP timeout in seconds.
-        app_tid: BTP Application Tenant ID of subscriber (optional).
         extra_data: Additional form data for the token request.
 
     Returns:
@@ -355,11 +333,6 @@ def _request_token_mtls(
         "grant_type": grant_type,
         "resource": _AGW_RESOURCE_URN,
     }
-
-    # TODO: app_tid requirement is still being clarified with the IBD team.
-    # This parameter may be removed if it turns out to be unnecessary.
-    if app_tid:
-        data["app_tid"] = app_tid
 
     if extra_data:
         data.update(extra_data)
@@ -413,7 +386,6 @@ def _request_token_transparent(
     credentials: CustomerCredentials,
     grant_type: str,
     timeout: float,
-    app_tid: str | None = None,
     extra_data: dict | None = None,
 ) -> dict:
     """Make standard HTTPS token request without mTLS (transparent mode).
@@ -425,7 +397,6 @@ def _request_token_transparent(
         credentials: Customer credentials (certificate and private_key should be None).
         grant_type: OAuth2 grant type.
         timeout: HTTP timeout in seconds.
-        app_tid: BTP Application Tenant ID of subscriber (optional).
         extra_data: Additional form data for the token request.
 
     Returns:
@@ -439,9 +410,6 @@ def _request_token_transparent(
         "grant_type": grant_type,
         "resource": _AGW_RESOURCE_URN,
     }
-
-    if app_tid:
-        data["app_tid"] = app_tid
 
     if extra_data:
         data.update(extra_data)
@@ -491,7 +459,6 @@ def _request_token_transparent(
 def get_system_token_mtls(
     credentials: CustomerCredentials,
     timeout: float,
-    app_tid: str | None = None,
     token_cache: _TokenCache | None = None,
 ) -> str:
     """Get system-scoped token using client credentials flow.
@@ -505,13 +472,12 @@ def get_system_token_mtls(
     Args:
         credentials: Customer credentials.
         timeout: HTTP timeout in seconds.
-        app_tid: BTP Application Tenant ID of subscriber (optional).
         token_cache: Optional token cache used to reuse still-valid tokens.
 
     Returns:
         System-scoped access token, fetched or served from cache.
     """
-    scope_key = _cache_scope_key(credentials, app_tid)
+    scope_key = _cache_scope_key(credentials)
     if token_cache:
         cached_token = token_cache.get_system_token(scope_key)
         if cached_token:
@@ -526,7 +492,6 @@ def get_system_token_mtls(
             credentials,
             grant_type=_GRANT_TYPE_CLIENT_CREDENTIALS,
             timeout=timeout,
-            app_tid=app_tid,
             extra_data={"response_type": "token"},
         )
     else:
@@ -536,7 +501,6 @@ def get_system_token_mtls(
             credentials,
             grant_type=_GRANT_TYPE_CLIENT_CREDENTIALS,
             timeout=timeout,
-            app_tid=app_tid,
             extra_data={"response_type": "token"},
         )
 
@@ -556,7 +520,6 @@ def exchange_user_token(
     credentials: CustomerCredentials,
     user_token: str,
     timeout: float,
-    app_tid: str | None = None,
     token_cache: _TokenCache | None = None,
 ) -> str:
     """Exchange user token for AGW-scoped token using jwt-bearer grant.
@@ -572,14 +535,13 @@ def exchange_user_token(
         credentials: Customer credentials.
         user_token: User's JWT token to exchange.
         timeout: HTTP timeout in seconds.
-        app_tid: BTP Application Tenant ID of subscriber (optional).
         token_cache: Optional token cache used to reuse still-valid exchanged
             tokens.
 
     Returns:
         AGW-scoped access token with user identity, fetched or served from cache.
     """
-    scope_key = _cache_scope_key(credentials, app_tid)
+    scope_key = _cache_scope_key(credentials)
     if token_cache:
         cached_token = token_cache.get_user_token(user_token, scope_key)
         if cached_token:
@@ -594,7 +556,6 @@ def exchange_user_token(
             credentials,
             grant_type=_GRANT_TYPE_JWT_BEARER,
             timeout=timeout,
-            app_tid=app_tid,
             extra_data={
                 "assertion": user_token,
                 "token_format": "jwt",
@@ -609,7 +570,6 @@ def exchange_user_token(
             credentials,
             grant_type=_GRANT_TYPE_JWT_BEARER,
             timeout=timeout,
-            app_tid=app_tid,
             extra_data={
                 "assertion": user_token,
                 "token_format": "jwt",
